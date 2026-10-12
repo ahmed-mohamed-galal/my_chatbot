@@ -129,6 +129,8 @@ def refusal(question: str) -> str:
 
 
 def in_scope(question: str, judge_llm) -> bool:
+    if question.strip().lower().strip("!?.،؟ ") in GREETINGS:
+        return True
     msg = f"""Decide if the question is about Ahmed Mohamed Galal: his skills, experience,
 projects, education, certifications, contact info, or whether he does or does not offer a
 certain service or technology. Questions in Arabic or English are both valid.
@@ -162,8 +164,8 @@ Examples:
 Answer with exactly one word: YES or NO.
 Question: {question}
 Answer:"""
-    out = judge_llm.invoke(msg).content.strip().upper()
-    return out.startswith("YES")
+    out = (judge_llm.invoke(msg).content or "").strip().upper()
+    return "YES" in out
 
 
 def chat(question: str, retriever, answer_llm, judge_llm) -> str:
