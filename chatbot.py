@@ -5,20 +5,28 @@ from pathlib import Path
 
 import streamlit as st
 from langchain_community.document_loaders import PyMuPDFLoader, TextLoader
+from langchain_community.embeddings import FastEmbedEmbeddings
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.vectorstores import InMemoryVectorStore
-from langchain_ollama import ChatOllama, OllamaEmbeddings
+from langchain_groq import ChatGroq
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-# ----------------------------------------------------------------------------
-# Settings
-# ----------------------------------------------------------------------------
+
 BASE_DIR = Path(__file__).parent
 CV_DIR = BASE_DIR / "cvs"
-CHAT_MODEL = "gemma3:4b"
-EMBED_MODEL = "nomic-embed-text"
+CHAT_MODEL = "openai/gpt-oss-120b"
+JUDGE_MODEL = "openai/gpt-oss-20b"
+EMBED_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+MAX_QUESTION_CHARS = 500
+import dotenv
 
-# IMPORTANT: replace the two ABOUT ME placeholders with text taken from your CV.
+dotenv.load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
+dotenv.load_dotenv()
+
+if "GROQ_API_KEY" not in os.environ:
+    if hasattr(st, "secrets") and "GROQ_API_KEY" in st.secrets:
+        os.environ["GROQ_API_KEY"] = st.secrets["GROQ_API_KEY"]
+
 SCOPE = """
 Name: Ahmed Mohamed Galal (in Arabic: أحمد محمد جلال)
 ABOUT ME (English): <PUT 2-3 SENTENCES FROM YOUR CV HERE>
@@ -33,8 +41,15 @@ OUT_OF_SCOPE_EN = (
     "Sorry, this is outside my services. "
     "I can help with questions about my skills, experience and projects."
 )
+TOO_LONG_AR = "رسالتك طويلة جداً. من فضلك اختصرها."
+TOO_LONG_EN = "Your message is too long. Please shorten it."
 
 ARABIC_RE = re.compile(r"[\u0600-\u06FF]")
+
+GREETINGS = {
+    "hello", "hi", "hey", "good morning", "good evening",
+    "مرحبا", "مرحباً", "اهلا", "أهلا", "السلام عليكم", "هاي", "صباح الخير", "مساء الخير",
+}
 
 PROMPT = ChatPromptTemplate(
     [
@@ -85,9 +100,6 @@ PROMPT = ChatPromptTemplate(
 )
 
 
-# ----------------------------------------------------------------------------
-# Cached resources (built once, not on every Streamlit rerun)
-# ----------------------------------------------------------------------------
 @st.cache_resource(show_spinner="Loading CV and building the index...")
 def load_retriever():
     docs = []
@@ -100,20 +112,30 @@ def load_retriever():
 
     splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=150)
     chunks = splitter.split_documents(docs)
-    store = InMemoryVectorStore.from_documents(chunks, OllamaEmbeddings(model=EMBED_MODEL))
-    return store.as_retriever(search_type="mmr", search_kwargs={"k": 6, "fetch_k": 15})
+    store = InMemoryVectorStore.from_documents(
+        chunks, FastEmbedEmbeddings(model_name=EMBED_MODEL)
+    )
+    return store.as_retriever(search_type="mmr", search_kwargs={"k": 4, "fetch_k": 12})
 
 
 @st.cache_resource
 def load_llms():
-    answer_llm = ChatOllama(model=CHAT_MODEL, temperature=0.2)
-    judge_llm = ChatOllama(model=CHAT_MODEL, temperature=0)
+    answer_llm = ChatGroq(
+        model=CHAT_MODEL,
+        temperature=0.2,
+        max_tokens=1500,
+        reasoning_effort="low",
+    )
+    judge_llm = ChatGroq(
+        model=JUDGE_MODEL,
+        temperature=0,
+        max_tokens=200,
+        reasoning_effort="low",
+    )
     return answer_llm, judge_llm
 
 
-# ----------------------------------------------------------------------------
-# Logic
-# ----------------------------------------------------------------------------
+
 def format_docs(docs):
     return "\n\n".join(
         f"[{os.path.basename(d.metadata.get('source', ''))}]\n{d.page_content}" for d in docs
@@ -131,6 +153,7 @@ def refusal(question: str) -> str:
 def in_scope(question: str, judge_llm) -> bool:
     if question.strip().lower().strip("!?.،؟ ") in GREETINGS:
         return True
+
     msg = f"""Decide if the question is about Ahmed Mohamed Galal: his skills, experience,
 projects, education, certifications, contact info, or whether he does or does not offer a
 certain service or technology. Questions in Arabic or English are both valid.
@@ -141,7 +164,7 @@ His scope:
 ALWAYS answer YES for:
 - Questions asking who Ahmed is or to introduce himself or tell about himself.
 - Greetings and "what can you help me with" questions.
-- "Do you do X?" or "Do you know X?" questions, even if the real answer is no.
+- "Do you do machine learning project?" or "Do you know Data Science?" questions, even if the real answer is no.
 General knowledge, jokes, or unrelated tasks are NO.
 
 Examples:
@@ -164,11 +187,51 @@ Examples:
 Answer with exactly one word: YES or NO.
 Question: {question}
 Answer:"""
+
     out = (judge_llm.invoke(msg).content or "").strip().upper()
     return "YES" in out
 
+    msg = f"""Decide if the question is about Ahmed Mohamed Galal: his skills, experience,
+projects, education, certifications, contact info, or whether he does or does not offer a
+certain service or technology. Questions in Arabic or English are both valid.
+
+His scope:
+{SCOPE}
+
+ALWAYS answer YES for:
+- Questions asking who Ahmed is or to introduce himself or tell about himself.
+- Greetings and "what can you help me with" questions.
+- "Do you do machine learning project?" or "Do you know Data Science?" questions, even if the real answer is no.
+General knowledge, jokes, or unrelated tasks are NO.
+
+Examples:
+"انت مين؟" -> YES
+"عرفني عن نفسك" -> YES
+"Tell me about yourself" -> YES
+"Who are you?" -> YES
+"What can you do?" -> YES
+"Hello" -> YES
+"مرحبا" -> YES
+"ازاي اتواصل معاك؟" -> YES
+"ايه خبرتك في Machine Learning؟" -> YES
+"بتعمل تطبيقات موبايل؟" -> YES
+"Do you know React?" -> YES
+"ايه عاصمة فرنسا؟" -> NO
+"What is the capital of France?" -> NO
+"احكيلي نكتة" -> NO
+"Write me a Python script" -> NO
+
+Answer with exactly one word: YES or NO.
+Question: {question}
+Answer:"""
+    out = judge_llm.invoke(msg).content.strip().upper()
+    return out.startswith("YES")
+
 
 def chat(question: str, retriever, answer_llm, judge_llm) -> str:
+    if len(question) > MAX_QUESTION_CHARS:
+        return TOO_LONG_AR if ARABIC_RE.search(question) else TOO_LONG_EN
+
     if not in_scope(question, judge_llm):
         return refusal(question)
 
@@ -183,7 +246,6 @@ def chat(question: str, retriever, answer_llm, judge_llm) -> str:
     )
     answer = answer_llm.invoke(msgs).content
 
-    # Safety net: English question must not get an Arabic answer
     if lang == "English" and ARABIC_RE.search(answer):
         answer = answer_llm.invoke(msgs).content
         if ARABIC_RE.search(answer):
@@ -191,12 +253,8 @@ def chat(question: str, retriever, answer_llm, judge_llm) -> str:
     return answer
 
 
-# ----------------------------------------------------------------------------
-# UI
-# ----------------------------------------------------------------------------
 st.set_page_config(page_title="Ahmed Galal | AI Assistant", page_icon="🤖")
 
-# Let each paragraph pick its own direction (Arabic = RTL, English = LTR)
 st.markdown(
     """
     <style>
@@ -248,7 +306,7 @@ if question := st.chat_input("Type your question..."):
             try:
                 reply = chat(question, retriever, answer_llm, judge_llm)
             except Exception as e:
-                reply = f"Error talking to Ollama. Is it running? ({e})"
+                reply = f"Error talking to the model. Please try again in a moment. ({e})"
         st.markdown(reply)
 
     st.session_state.messages.append({"role": "assistant", "content": reply})
