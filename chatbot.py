@@ -66,8 +66,10 @@ GREETINGS = {
 IN_SCOPE_KEYWORDS = re.compile(
     r"(أحمد|احمد|جلال|ahmed|galal|نفسك|مشاريع|مشروع|خبرات|خبرت|خبرة|مهارات|مهارة|"
     r"شهادات|تعليم|تواصل|تشتغل|بتعمل|تعرف|دراستك|كلية|جامعة|تدريب|شغل|"
+    r"رقم|تليفون|هاتف|موبايل|ايميل|إيميل|" # تمت إضافة كلمات التواصل العربية هنا
     r"project|skill|experience|about you|yourself|who are you|what do you do|"
     r"contact|email|linkedin|github|cv|resume|education|certificat|intern|"
+    r"phone|number|mobile|" # تمت إضافة كلمات التواصل الإنجليزية هنا
     r"python|sql|machine learning|deep learning|nlp|rag|llm|data scien|ai|ذكاء اصطناعي|بيانات|تعلم الآلة)",
     re.IGNORECASE,
 )
@@ -84,7 +86,7 @@ JUDGE_PROMPT = ChatPromptTemplate.from_messages([
         f"His scope:\n{SCOPE}\n\n"
         "ALWAYS answer YES for:\n"
         "- Questions asking who he is, to introduce himself, or 'tell me about yourself' (اخبرني عن نفسك / عرفني بنفسك).\n"
-        "- Questions about his projects, skills, CV, experience, education, or contact info (ايه مشاريعك / ايه خبرتك).\n"
+        "- Questions about his projects, skills, CV, experience, education, or contact info (ايه مشاريعك / ايه خبرتك / رقم التليفون / الايميل).\n"
         "- Questions asking 'do you know/do X?' (even if the answer is no, e.g. 'بتعمل تطبيقات موبايل؟').\n\n"
         "Answer NO ONLY for general knowledge (e.g. capital of France), jokes, or writing unrelated code.\n"
         "Reply with ONLY one word: YES or NO."
