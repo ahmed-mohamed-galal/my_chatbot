@@ -62,19 +62,32 @@ GREETINGS = {
     "مرحبا", "مرحباً", "اهلا", "أهلا", "السلام عليكم", "هاي", "صباح الخير", "مساء الخير",
 }
 
+# Instant keyword bypass for obvious in-scope questions (0ms, no LLM call needed)
+IN_SCOPE_KEYWORDS = re.compile(
+    r"(أحمد|احمد|جلال|ahmed|galal|نفسك|مشاريع|مشروع|خبرات|خبرت|خبرة|مهارات|مهارة|"
+    r"شهادات|تعليم|تواصل|تشتغل|بتعمل|تعرف|دراستك|كلية|جامعة|تدريب|شغل|"
+    r"project|skill|experience|about you|yourself|who are you|what do you do|"
+    r"contact|email|linkedin|github|cv|resume|education|certificat|intern|"
+    r"python|sql|machine learning|deep learning|nlp|rag|llm|data scien|ai|ذكاء اصطناعي|بيانات|تعلم الآلة)",
+    re.IGNORECASE,
+)
+
+
 # 4. Pre-compiled Prompts
 JUDGE_PROMPT = ChatPromptTemplate.from_messages([
     (
         "system",
-        "Decide if the user's question is about Ahmed Mohamed Galal (his skills, experience, "
-        "projects, education, certifications, contact info, or whether he offers a specific "
-        "service/technology).\n\n"
+        "You are a scope classifier for Ahmed Mohamed Galal's portfolio chatbot.\n"
+        "NOTE: The user is talking directly to Ahmed's assistant, so pronouns like "
+        "'you', 'yourself', 'your projects' (أنت، نفسك، مشاريعك، خبراتك، مهاراتك، انت مين) "
+        "ALL refer to Ahmed Mohamed Galal.\n\n"
         f"His scope:\n{SCOPE}\n\n"
-        "Rules:\n"
-        "- Answer YES for introductions, greetings, 'what can you do', or 'do you know/do X?' "
-        "(even if X is not in his skills).\n"
-        "- Answer NO for general knowledge, coding requests, jokes, or unrelated tasks.\n"
-        "- Reply with ONLY one word: YES or NO."
+        "ALWAYS answer YES for:\n"
+        "- Questions asking who he is, to introduce himself, or 'tell me about yourself' (اخبرني عن نفسك / عرفني بنفسك).\n"
+        "- Questions about his projects, skills, CV, experience, education, or contact info (ايه مشاريعك / ايه خبرتك).\n"
+        "- Questions asking 'do you know/do X?' (even if the answer is no, e.g. 'بتعمل تطبيقات موبايل؟').\n\n"
+        "Answer NO ONLY for general knowledge (e.g. capital of France), jokes, or writing unrelated code.\n"
+        "Reply with ONLY one word: YES or NO."
     ),
     ("human", "{question}"),
 ])
@@ -159,7 +172,7 @@ def load_llms():
     judge_llm = ChatGroq(
         model=JUDGE_MODEL,
         temperature=0,
-        max_tokens=10,  # Reduced from 200: we only need "YES" or "NO"
+        max_tokens=200,  # Ensure reasoning models have enough tokens to think before outputting
         reasoning_effort="low",
     )
     return answer_llm, judge_llm
@@ -182,9 +195,14 @@ def is_greeting(text: str) -> bool:
 
 
 def in_scope(question: str, judge_llm) -> bool:
+    # 1. Fast-path: check obvious CV/portfolio keywords first
+    if IN_SCOPE_KEYWORDS.search(question):
+        return True
+
+    # 2. Otherwise, ask the Judge LLM
     chain = JUDGE_PROMPT | judge_llm
     out = (chain.invoke({"question": question}).content or "").strip().upper()
-    return out.startswith("YES")
+    return "YES" in out
 
 
 def generate_response(question: str, retriever, answer_llm, judge_llm) -> str:
