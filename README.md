@@ -2,7 +2,7 @@
 
 A bilingual (English / Arabic) chatbot that answers questions about my skills, experience and projects, using my CV as its only source of truth.
 
-**🔗 Live demo:** [ahmed-galal-chatbot.streamlit.app](https://ahmed-galal-chatbot.streamlit.app/)
+**🔗 Live demo:** [ahmed-galal-chatbot.streamlit.app]([https://ahmed-galal-chatbot.streamlit.app/](https://ahmed-galal-chatbot.streamlit.app/))
 
 ## ✨ Features
 
